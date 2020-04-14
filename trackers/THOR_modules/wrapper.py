@@ -17,15 +17,17 @@ from .utils import *
 from .modules import ST_Module, LT_Module, Dummy_Module
 
 MEDIATE_SIZE = 255
-
+li=[]
+flag=True
+flag1=True
+li2=[]
 class THOR_Wrapper():
     def __init__(self, cfg, net):
-        use_cuda = torch.cuda.is_available()
-        self.device = torch.device("cuda" if use_cuda else "cpu")
-        self._cfg = SimpleNamespace(**cfg)
-
+        use_cuda = torch.cuda.is_available() #CUDA is available#
+        self.device = torch.device("cuda" if use_cuda else "cpu") #OK#
+        self._cfg = SimpleNamespace(**cfg) #pritul:- It is reading from json#
         self._mem_len_total = self._cfg.K_st + self._cfg.K_lt
-        assert self._cfg.K_lt > 0
+        assert self._cfg.K_lt > 0 #OK#
 
         self.do_full_init = True
         self._net = net
@@ -37,15 +39,22 @@ class THOR_Wrapper():
         """
         initialize the short-term and long-term module
         """
+
         self.avg_chans = np.mean(im, axis=(0, 1))
         self._frame_no = 0
-
+        global flag
+        global flag1
         # make the template
         crop = self._get_crop(im, pos, sz)
-        temp = self._make_template(crop)
-
+        if flag1:
+            temp = self._make_template(crop)
+            li2.append(self._make_template(crop))
+            flag1=False
+        else:
+            temp=li2[0]
+        #li.append(self._make_template(crop))
         # initialize the short term module
-        if self._cfg.K_st:
+        if self._cfg.K_st and temp:
             self.st_module = ST_Module(K=self._cfg.K_st, template_keys=self.template_keys,
                                        calc_div=(self._cfg.lb_type=='dynamic'),
                                        verbose=self._cfg.verbose, viz=self._cfg.viz)
@@ -69,17 +78,25 @@ class THOR_Wrapper():
         update the short-term and long-term module and
         update the shown templates and activations (score_viz)
         """
+        print("updating")
         self._frame_no += 1
-
+        global flag
         # only update according to dilation steps
-        if not self._frame_no%self._cfg.dilation:
+        if not self._frame_no%self._cfg.dilation and flag:
             crop = self._get_crop(im, pos, sz)
             temp = self.crop_to_mem(crop)
-
+            li.append(self.crop_to_mem(crop))
+            flag=False
             # reset st if it drifted
             if self._cfg.K_st and self._curr_type=='lt':
                 self.st_module.fill(temp)
-
+        
+        if flag==False:
+            print("inside else")
+            temp=li[0]
+            if self._cfg.K_st and self._curr_type=='lt':
+                self.st_module.fill(temp)
+            
         if self._cfg.viz:
             self._show_modulate(torch_to_img(curr_crop), self.score_viz)
             self._show_templates('st')
@@ -107,7 +124,8 @@ class THOR_Wrapper():
         score_st, score_lt = np.split(score, [self._cfg.K_st])
         best_st = [] if not len(score_st) else np.argmax(score_st)
         best_lt = np.argmax(score_lt) + self._cfg.K_st
-
+        print(best_st)
+        print(best_lt)
         # calculate iou and switch to lt if iou too low
         iou = self.get_IoU(pos.T[best_st], sz.T[best_st], pos.T[best_lt], sz.T[best_lt])
         self._curr_type = 'lt' if iou < self._cfg.iou_tresh else 'st'
@@ -168,10 +186,10 @@ class THOR_Wrapper():
         im_color = cv2.applyColorMap(score_im_base, cv2.COLORMAP_JET)
 
         # show the image
-        overlayed_im = cv2.addWeighted(im, 0.8, im_color, 0.7, 0)
+        overlayed_im = cv2.addWeighted(im, 0.5, im_color, 0.7, 0)
         canvas[:, :im.shape[1], :] = overlayed_im
         cv2.imshow('modulated', canvas)
-        cv2.moveWindow('modulated', 1200, 800)
+        cv2.moveWindow('modulated', 1200, 1200)
 
     @abc.abstractmethod
     def custom_forward(self, x):
@@ -432,6 +450,8 @@ class THOR_SiamRPN(THOR_Wrapper):
         best_temp, lt_score = self._get_best_temp(target_pos, target_sz, best_scores)
         return np.squeeze(target_pos[:, best_temp]), np.squeeze(target_sz[:, best_temp]), lt_score
 
+#flag=True
+#li=[]
 class THOR_SiamMask(THOR_Wrapper):
     def __init__(self, cfg, net):
         super(THOR_SiamMask, self).__init__(cfg, net)
@@ -501,6 +521,7 @@ class THOR_SiamMask(THOR_Wrapper):
 
         # scale penalty
         target_sz_in_crop = size*scale_x
+
         s_c = change(sz(delta[:, 2, :], delta[:, 3, :]) / (sz_wh(target_sz_in_crop)))
         # ratio penalty
         r_c = change((size[0] / size[1]) / (delta[:, 2, :] / delta[:, 3, :]))
@@ -530,9 +551,20 @@ class THOR_SiamMask(THOR_Wrapper):
         target_sz = np.array([res_w, res_h])
         best_scores = pscore[np.arange(batch_sz), best_pscore_id]
 
+        flag=True
         # determine the currently best template
-        best_temp, lt_score = self._get_best_temp(target_pos, target_sz, best_scores)
-        self._net.best_temp = best_temp
-
+        if flag:
+            #print("inside if")
+            best_temp, lt_score = self._get_best_temp(target_pos, target_sz, best_scores)
+            self._net.best_temp = best_temp
+            #print(best_temp)
+            #li.append(self._get_best_temp(target_pos, target_sz, best_scores))
+            #flag=False
+        else:
+            #print("inside else")
+            best_temp, lt_score = li[0]
+            #print(best_temp)
+            self._net.best_temp = best_temp
+            
         return np.squeeze(target_pos[:, best_temp]), np.squeeze(target_sz[:, best_temp]), \
                 lt_score, best_pscore_id[best_temp]
