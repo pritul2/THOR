@@ -4,7 +4,7 @@
 # Written by Axel Sauer (axel.sauer@tum.de)
 # --------------------------------------------------------
 
-import pdb
+import ipdb
 import argparse, cv2, os
 import numpy as np
 import sys
@@ -41,7 +41,7 @@ boxToDraw = np.zeros(4)
 mousedown = False
 mouseupdown = False
 initialize = False
-
+flag=True
 def on_mouse(event, x, y, flags, params):
     global mousedown, mouseupdown, drawnBox, boxToDraw, initialize, boxToDraw_xywh
     if event == cv2.EVENT_LBUTTONDOWN:
@@ -93,7 +93,7 @@ def show_webcam(tracker, mirror=False, viz=False):
     # loop over video stream ims
     while True:
         _, im = vs.read()
-
+        global flag
         if mirror:
             im = cv2.flip(im, 1)
 
@@ -104,8 +104,15 @@ def show_webcam(tracker, mirror=False, viz=False):
 
         elif mouseupdown:
             if initialize:
-                init_pos = boxToDraw_xywh[[0, 1]]
-                init_sz = boxToDraw_xywh[[2, 3]]
+                if flag:
+                    init_pos = boxToDraw_xywh[[0, 1]]
+                    init_sz = boxToDraw_xywh[[2, 3]]
+                    #ipdb.set_trace()
+                    flag=False
+                else:
+                    init_pos = np.asarray([318.0,238.5],"float")
+                    init_pos = np.asarray([632.,471.0],"float")
+                print(init_pos,init_sz)
                 state = tracker.setup(im, init_pos, init_sz)
                 initialize = False
                 fps = FPS().start()
@@ -125,6 +132,9 @@ def show_webcam(tracker, mirror=False, viz=False):
 
                 if not state['score'] > 0.8:
                     info.insert(0, ("Object lost since", ""))
+                    print('object lost')
+                    print('re-establishing')
+                    state = tracker.setup(im, np.asarray([318.0,238.5],"float"), np.asarray([632.,471.0],"float"))
                 else:
                     if 'mask' in state.keys():
                         mask = state['mask'] > state['p'].seg_thr
@@ -156,7 +166,7 @@ def load_cfg(args):
 
 if __name__ == '__main__':
     args = parser.parse_args()
-
+    args.viz=False
     cfg = load_cfg(args)
     cfg['THOR']['viz'] = args.viz
     cfg['THOR']['verbose'] = args.verbose
